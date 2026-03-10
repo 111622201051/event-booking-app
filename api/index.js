@@ -87,35 +87,38 @@ app.post("/book", (req, res) => {
     bookedAt: new Date().toISOString()
   };
 
-  // Send emails fire-and-forget (non-blocking)
-  if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
-    transporter.sendMail({
-      from: `"EventBook" <${process.env.GMAIL_USER}>`,
-      to: email,
-      subject: `✅ Booking Confirmed — ${event.title}`,
-      html: buildEmailHTML({ name, eventTitle: event.title, eventDate: event.date, seatNumber, bookingId })
-    }).then(() => console.log(`📧 Email sent to ${email}`))
-      .catch(err => console.error("❌ User email failed:", err.message));
+  // Send user confirmation email — fire and forget (no await, no if check)
+  transporter.sendMail({
+    from: `"EventBook" <${process.env.GMAIL_USER}>`,
+    to: email,
+    subject: `✅ Booking Confirmed — ${event.title}`,
+    html: buildEmailHTML({ name, eventTitle: event.title, eventDate: event.date, seatNumber, bookingId })
+  }).then(() => console.log(`📧 Email sent to ${email}`))
+    .catch(err => console.error("❌ User email failed:", err.message));
 
-    transporter.sendMail({
-      from: `"EventBook" <${process.env.GMAIL_USER}>`,
-      to: process.env.GMAIL_USER,
-      subject: `🔔 New Booking — ${event.title}`,
-      html: `
-        <h2>🔔 New Booking Received</h2>
-        <p><b>Name:</b> ${name}</p>
-        <p><b>Email:</b> ${email}</p>
-        <p><b>Event:</b> ${event.title}</p>
-        <p><b>Date:</b> ${event.date}</p>
-        <p><b>Seat:</b> #${seatNumber}</p>
-        <p><b>Booking ID:</b> ${bookingId}</p>
-        <p><b>Booked At:</b> ${new Date().toLocaleString()}</p>
-      `
-    }).then(() => console.log(`🔔 Admin notified`))
-      .catch(err => console.error("❌ Admin email failed:", err.message));
-  }
+  // Send admin notification — fire and forget
+  transporter.sendMail({
+    from: `"EventBook" <${process.env.GMAIL_USER}>`,
+    to: process.env.GMAIL_USER,
+    subject: `🔔 New Booking — ${event.title}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f8fafc;border-radius:12px;">
+        <h2 style="color:#4f46e5;">🔔 New Booking Received</h2>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+          <tr><td style="padding:8px;color:#64748b;">Name</td><td style="padding:8px;font-weight:600;">${name}</td></tr>
+          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Email</td><td style="padding:8px;font-weight:600;">${email}</td></tr>
+          <tr><td style="padding:8px;color:#64748b;">Event</td><td style="padding:8px;font-weight:600;">${event.title}</td></tr>
+          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Date</td><td style="padding:8px;font-weight:600;">${event.date}</td></tr>
+          <tr><td style="padding:8px;color:#64748b;">Seat</td><td style="padding:8px;font-weight:600;">#${seatNumber}</td></tr>
+          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Booking ID</td><td style="padding:8px;font-weight:600;">${bookingId}</td></tr>
+          <tr><td style="padding:8px;color:#64748b;">Booked At</td><td style="padding:8px;font-weight:600;">${new Date().toLocaleString()}</td></tr>
+        </table>
+      </div>
+    `
+  }).then(() => console.log(`🔔 Admin notified`))
+    .catch(err => console.error("❌ Admin email failed:", err.message));
 
-  // Respond immediately — don't wait for email
+  // Respond immediately — don't wait for emails
   return res.status(200).json({
     message: "Booking confirmed!",
     booking: {
@@ -154,7 +157,7 @@ app.get("/cancel", (req, res) => {
       <h1 style="color:#ef4444;">❌ Booking Cancelled</h1>
       <p>Your booking for <strong>${event?.title}</strong> has been cancelled.</p>
       <p style="color:#64748b;">Booking ID: ${bookingId}</p>
-      <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" 
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}"
          style="display:inline-block;margin-top:16px;padding:10px 24px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;">
         ← Back to EventBook
       </a>
@@ -171,4 +174,5 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API running on http://localhost:${PORT}`);
+  console.log(`📧 Gmail user: ${process.env.GMAIL_USER || "NOT SET — check .env"}`);
 });
