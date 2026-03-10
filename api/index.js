@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { Resend } = require("resend");
+const axios = require("axios");
 require("dotenv").config();
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -65,14 +66,43 @@ const bookings = {};
 /* ---------------------- RESEND EMAIL SETUP ---------------------- */
 // Using Resend API (works on Render — no SMTP port blocking)
 
-/* ---------------------- SEND EMAIL ---------------------- */
-async function sendEmail({ to, subject, html }) {
-  if (!process.env.RESEND_API_KEY) {
-    console.error("❌ Email skipped — RESEND_API_KEY is not set!");
+/* ---------------------- SEND USER EMAIL (BREVO) ---------------------- */
+async function sendUserEmail({ to, subject, html }) {
+  if (!process.env.BREVO_API_KEY) {
+    console.error("❌ User email skipped — BREVO_API_KEY is not set!");
     return;
   }
   if (!to) {
-    console.error("❌ Email skipped — recipient address is missing!");
+    console.error("❌ User email skipped — recipient address is missing!");
+    return;
+  }
+
+  try {
+    const response = await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: { name: "EventBook", email: "karthinithish1914@gmail.com" },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html
+      },
+      {
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    console.log(`📧 User email sent to ${to} | MessageId: ${response.data.messageId}`);
+  } catch (err) {
+    console.error(`❌ User email FAILED to ${to}:`, err.response?.data?.message || err.message);
+  }
+}
+
+/* ---------------------- SEND ADMIN EMAIL (RESEND) ---------------------- */
+async function sendAdminEmail({ to, subject, html }) {
+  if (!process.env.RESEND_API_KEY) {
+    console.error("❌ Admin email skipped — RESEND_API_KEY is not set!");
     return;
   }
 
@@ -84,12 +114,12 @@ async function sendEmail({ to, subject, html }) {
       html
     });
     if (error) {
-      console.error(`❌ Email FAILED to ${to}:`, error.message);
+      console.error(`❌ Admin email FAILED to ${to}:`, error.message);
     } else {
-      console.log(`📧 Email sent to ${to} | ID: ${data.id}`);
+      console.log(`📧 Admin email sent to ${to} | ID: ${data.id}`);
     }
   } catch (err) {
-    console.error(`❌ Email FAILED to ${to}:`, err.message);
+    console.error(`❌ Admin email FAILED to ${to}:`, err.message);
   }
 }
 
@@ -270,9 +300,9 @@ app.post("/book", async (req, res) => {
     }
   });
 
-  // ✅ Send confirmation email to USER
+  // ✅ Send confirmation email to USER via Brevo
   console.log(`📤 Sending confirmation email to user: ${email}`);
-  await sendEmail({
+  await sendUserEmail({
     to: email,
     subject: `✅ Booking Confirmed — ${event.title}`,
     html: buildUserEmailHTML({
@@ -286,9 +316,9 @@ app.post("/book", async (req, res) => {
     })
   });
 
-  // ✅ Send notification email to ADMIN (kartad044@rmkcet.ac.in)
+  // ✅ Send notification email to ADMIN via Resend
   console.log(`📤 Sending booking details to admin: ${ADMIN_EMAIL}`);
-  await sendEmail({
+  await sendAdminEmail({
     to: ADMIN_EMAIL,
     subject: `🔔 New Booking — ${event.title} by ${name}`,
     html: buildAdminEmailHTML({ name, email, event, seatNumber, bookingId })
@@ -335,6 +365,7 @@ app.get("/health", (req, res) => {
     admin_email: ADMIN_EMAIL,
     env: {
       RESEND_API_KEY: process.env.RESEND_API_KEY ? "✅ SET" : "❌ MISSING",
+      BREVO_API_KEY: process.env.BREVO_API_KEY ? "✅ SET" : "❌ MISSING",
       API_URL: process.env.API_URL || "❌ NOT SET",
       FRONTEND_URL: process.env.FRONTEND_URL || "❌ NOT SET"
     }
@@ -346,5 +377,6 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API running on port ${PORT}`);
   console.log(`🔑 RESEND_API_KEY: ${process.env.RESEND_API_KEY ? "✅ SET" : "❌ NOT SET"}`);
+  console.log(`🔑 BREVO_API_KEY: ${process.env.BREVO_API_KEY ? "✅ SET" : "❌ NOT SET"}`);
   console.log(`👤 Admin notifications → ${ADMIN_EMAIL}`);
 });
