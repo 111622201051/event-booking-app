@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
 require("dotenv").config();
 
 const app = express();
@@ -17,14 +16,39 @@ let events = [
 
 const bookings = {};
 
-/* ---------------------- MAIL SETUP ---------------------- */
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS
+/* ---------------------- SEND EMAIL VIA RESEND ---------------------- */
+async function sendEmail({ to, subject, html }) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.error("❌ RESEND_API_KEY not set");
+    return;
   }
-});
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: "EventBook <onboarding@resend.dev>",
+        to,
+        subject,
+        html
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      console.log(`📧 Email sent to ${to} — ID: ${data.id}`);
+    } else {
+      console.error(`❌ Email failed:`, data);
+    }
+  } catch (err) {
+    console.error("❌ Email error:", err.message);
+  }
+}
 
 /* ---------------------- EMAIL TEMPLATE ---------------------- */
 const buildEmailHTML = ({ name, eventTitle, eventDate, seatNumber, bookingId }) => {
@@ -54,10 +78,9 @@ app.get("/events", (req, res) => {
 });
 
 /* ---------------------- BOOK EVENT ---------------------- */
-app.post("/book", (req, res) => {
+app.post("/book", async (req, res) => {
   const { eventId, name, email } = req.body;
 
-  // Validation
   if (!eventId || !name || !email) {
     return res.status(400).json({ message: "eventId, name, and email are required." });
   }
@@ -87,19 +110,21 @@ app.post("/book", (req, res) => {
     bookedAt: new Date().toISOString()
   };
 
-  // Send user confirmation email — fire and forget (no await, no if check)
-  transporter.sendMail({
-    from: `"EventBook" <${process.env.GMAIL_USER}>`,
+  // Respond immediately
+  res.status(200).json({
+    message: "Booking confirmed!",
+    booking: { eventId, name, email, eventTitle: event.title, eventDate: event.date, seatNumber, bookingId }
+  });
+
+  // Send emails after response (non-blocking)
+  sendEmail({
     to: email,
     subject: `✅ Booking Confirmed — ${event.title}`,
     html: buildEmailHTML({ name, eventTitle: event.title, eventDate: event.date, seatNumber, bookingId })
-  }).then(() => console.log(`📧 Email sent to ${email}`))
-    .catch(err => console.error("❌ User email failed:", err.message));
+  });
 
-  // Send admin notification — fire and forget
-  transporter.sendMail({
-    from: `"EventBook" <${process.env.GMAIL_USER}>`,
-    to: process.env.GMAIL_USER,
+  sendEmail({
+    to: process.env.ADMIN_EMAIL || process.env.GMAIL_USER,
     subject: `🔔 New Booking — ${event.title}`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f8fafc;border-radius:12px;">
@@ -108,28 +133,12 @@ app.post("/book", (req, res) => {
           <tr><td style="padding:8px;color:#64748b;">Name</td><td style="padding:8px;font-weight:600;">${name}</td></tr>
           <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Email</td><td style="padding:8px;font-weight:600;">${email}</td></tr>
           <tr><td style="padding:8px;color:#64748b;">Event</td><td style="padding:8px;font-weight:600;">${event.title}</td></tr>
-          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Date</td><td style="padding:8px;font-weight:600;">${event.date}</td></tr>
-          <tr><td style="padding:8px;color:#64748b;">Seat</td><td style="padding:8px;font-weight:600;">#${seatNumber}</td></tr>
-          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Booking ID</td><td style="padding:8px;font-weight:600;">${bookingId}</td></tr>
-          <tr><td style="padding:8px;color:#64748b;">Booked At</td><td style="padding:8px;font-weight:600;">${new Date().toLocaleString()}</td></tr>
+          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Seat</td><td style="padding:8px;font-weight:600;">#${seatNumber}</td></tr>
+          <tr><td style="padding:8px;color:#64748b;">Booking ID</td><td style="padding:8px;font-weight:600;">${bookingId}</td></tr>
+          <tr style="background:#fff;"><td style="padding:8px;color:#64748b;">Booked At</td><td style="padding:8px;font-weight:600;">${new Date().toLocaleString()}</td></tr>
         </table>
       </div>
     `
-  }).then(() => console.log(`🔔 Admin notified`))
-    .catch(err => console.error("❌ Admin email failed:", err.message));
-
-  // Respond immediately — don't wait for emails
-  return res.status(200).json({
-    message: "Booking confirmed!",
-    booking: {
-      eventId,
-      name,
-      email,
-      eventTitle: event.title,
-      eventDate: event.date,
-      seatNumber,
-      bookingId
-    }
   });
 });
 
@@ -174,5 +183,5 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API running on http://localhost:${PORT}`);
-  console.log(`📧 Gmail user: ${process.env.GMAIL_USER || "NOT SET — check .env"}`);
+  console.log(`📧 Resend API: ${process.env.RESEND_API_KEY ? "✅ SET" : "❌ NOT SET"}`);
 });
