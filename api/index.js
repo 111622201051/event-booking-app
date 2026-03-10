@@ -57,17 +57,14 @@ let events = [
 
 const bookings = {};
 
-/* ---------------------- MAIL TRANSPORTER (port 587) ---------------------- */
+/* ---------------------- BREVO SMTP TRANSPORTER ---------------------- */
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
+  host: "smtp-relay.brevo.com",
   port: 587,
   secure: false,
   auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
+    user: process.env.BREVO_USER,
+    pass: process.env.BREVO_SMTP_KEY
   }
 });
 
@@ -75,7 +72,7 @@ const transporter = nodemailer.createTransport({
 async function sendEmail({ to, subject, html }) {
   try {
     await transporter.sendMail({
-      from: `"EventBook" <${process.env.GMAIL_USER}>`,
+      from: `"EventBook" <${process.env.BREVO_USER}>`,
       to,
       subject,
       html
@@ -255,5 +252,5 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API running on http://localhost:${PORT}`);
-  console.log(`📧 Gmail: ${process.env.GMAIL_USER || "❌ NOT SET"}`);
+  console.log(`📧 Brevo user: ${process.env.BREVO_USER || "❌ NOT SET"}`);
 });
