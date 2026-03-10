@@ -65,25 +65,51 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.BREVO_USER,
     pass: process.env.BREVO_SMTP_KEY
+  },
+  tls: {
+    rejectUnauthorized: false // helps on some cloud platforms
+  }
+});
+
+/* ---------------------- VERIFY TRANSPORTER ON STARTUP ---------------------- */
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ SMTP connection FAILED:", error.message);
+    console.error("   → Check BREVO_USER and BREVO_SMTP_KEY in Render env vars");
+  } else {
+    console.log("✅ SMTP connection verified! Emails are ready to send.");
   }
 });
 
 /* ---------------------- SEND EMAIL ---------------------- */
 async function sendEmail({ to, subject, html }) {
+  // Guard: skip if env vars are missing
+  if (!process.env.BREVO_USER || !process.env.BREVO_SMTP_KEY) {
+    console.error("❌ Email skipped — BREVO_USER or BREVO_SMTP_KEY is not set in environment variables!");
+    return;
+  }
+  if (!to) {
+    console.error("❌ Email skipped — recipient 'to' address is missing!");
+    return;
+  }
+
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"EventBook" <${process.env.BREVO_USER}>`,
       to,
       subject,
       html
     });
-    console.log(`📧 Email sent to ${to}`);
+    console.log(`📧 Email sent to ${to} | MessageId: ${info.messageId}`);
   } catch (err) {
-    console.error(`❌ Email failed to ${to}:`, err.message);
+    console.error(`❌ Email FAILED to ${to}`);
+    console.error(`   Code: ${err.code}`);
+    console.error(`   Message: ${err.message}`);
+    if (err.response) console.error(`   SMTP Response: ${err.response}`);
   }
 }
 
-/* ---------------------- EMAIL TEMPLATE ---------------------- */
+/* ---------------------- EMAIL TEMPLATE (USER) ---------------------- */
 const buildEmailHTML = ({ name, eventTitle, eventDate, eventTime, eventLocation, seatNumber, bookingId }) => {
   const formattedDate = new Date(eventDate).toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric"
@@ -134,6 +160,31 @@ const buildEmailHTML = ({ name, eventTitle, eventDate, eventTime, eventLocation,
   `;
 };
 
+/* ---------------------- EMAIL TEMPLATE (ADMIN) ---------------------- */
+const buildAdminEmailHTML = ({ name, email, event, seatNumber, bookingId }) => `
+  <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:0;background:#ffffff;border-radius:16px;overflow:hidden;">
+    <div style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:24px;text-align:center;">
+      <div style="font-size:36px;">🔔</div>
+      <h2 style="color:#ffffff;margin:8px 0 0;font-size:20px;">New Booking Received</h2>
+    </div>
+    <div style="padding:24px;">
+      <div style="background:#f8fafc;border-radius:12px;padding:20px;border:1px solid #e2e8f0;">
+        <table style="width:100%;border-collapse:collapse;">
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">👤 Name</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${name}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">📧 Email</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${email}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">🎟️ Event</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.title}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">📅 Date</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.date}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">🕐 Time</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.time}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">📍 Location</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.location}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">💺 Seat</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">#${seatNumber}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;">🆔 Booking ID</td><td style="padding:8px 0;font-weight:600;font-size:12px;text-align:right;">${bookingId}</td></tr>
+        </table>
+      </div>
+      <p style="color:#9ca3af;font-size:12px;text-align:center;margin-top:16px;">Booked at ${new Date().toLocaleString()}</p>
+    </div>
+  </div>
+`;
+
 /* ---------------------- GET EVENTS ---------------------- */
 app.get("/events", (req, res) => {
   res.json(events);
@@ -166,49 +217,51 @@ app.post("/book", async (req, res) => {
   event.seats -= 1;
   const bookingId = `EVT-${eventId}-${Date.now()}`;
 
-  bookings[bookingKey] = { name, email, eventId, bookingId, seatNumber, bookedAt: new Date().toISOString() };
+  bookings[bookingKey] = {
+    name, email, eventId, bookingId, seatNumber,
+    bookedAt: new Date().toISOString()
+  };
 
-  // Respond immediately
+  // Respond immediately to user
   res.status(200).json({
     message: "Booking confirmed!",
-    booking: { eventId, name, email, eventTitle: event.title, eventDate: event.date, eventTime: event.time, eventLocation: event.location, seatNumber, bookingId }
+    booking: {
+      eventId, name, email,
+      eventTitle: event.title,
+      eventDate: event.date,
+      eventTime: event.time,
+      eventLocation: event.location,
+      seatNumber, bookingId
+    }
   });
 
-  // User confirmation email
-  sendEmail({
+  // ✅ Send user confirmation email
+  console.log(`📤 Sending confirmation email to user: ${email}`);
+  await sendEmail({
     to: email,
     subject: `✅ Booking Confirmed — ${event.title}`,
-    html: buildEmailHTML({ name, eventTitle: event.title, eventDate: event.date, eventTime: event.time, eventLocation: event.location, seatNumber, bookingId })
+    html: buildEmailHTML({
+      name,
+      eventTitle: event.title,
+      eventDate: event.date,
+      eventTime: event.time,
+      eventLocation: event.location,
+      seatNumber,
+      bookingId
+    })
   });
 
-  // Admin notification email
-  sendEmail({
-    to: process.env.ADMIN_EMAIL,
-    subject: `🔔 New Booking — ${event.title}`,
-    html: `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:0;background:#ffffff;border-radius:16px;overflow:hidden;">
-        <div style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:24px;text-align:center;">
-          <div style="font-size:36px;">🔔</div>
-          <h2 style="color:#ffffff;margin:8px 0 0;font-size:20px;">New Booking Received</h2>
-        </div>
-        <div style="padding:24px;">
-          <div style="background:#f8fafc;border-radius:12px;padding:20px;border:1px solid #e2e8f0;">
-            <table style="width:100%;border-collapse:collapse;">
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">👤 Name</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${name}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">📧 Email</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${email}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">🎟️ Event</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.title}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">📅 Date</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.date}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">🕐 Time</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.time}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">📍 Location</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">${event.location}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #f1f5f9;">💺 Seat</td><td style="padding:8px 0;font-weight:600;font-size:13px;text-align:right;border-bottom:1px solid #f1f5f9;">#${seatNumber}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;">🆔 Booking ID</td><td style="padding:8px 0;font-weight:600;font-size:12px;text-align:right;">${bookingId}</td></tr>
-            </table>
-          </div>
-          <p style="color:#9ca3af;font-size:12px;text-align:center;margin-top:16px;">Booked at ${new Date().toLocaleString()}</p>
-        </div>
-      </div>
-    `
-  });
+  // ✅ Send admin notification email
+  if (process.env.ADMIN_EMAIL) {
+    console.log(`📤 Sending notification email to admin: ${process.env.ADMIN_EMAIL}`);
+    await sendEmail({
+      to: process.env.ADMIN_EMAIL,
+      subject: `🔔 New Booking — ${event.title}`,
+      html: buildAdminEmailHTML({ name, email, event, seatNumber, bookingId })
+    });
+  } else {
+    console.warn("⚠️ ADMIN_EMAIL not set — skipping admin notification");
+  }
 });
 
 /* ---------------------- CANCEL BOOKING ---------------------- */
@@ -245,12 +298,24 @@ app.get("/cancel", (req, res) => {
 
 /* ---------------------- HEALTH CHECK ---------------------- */
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    env: {
+      BREVO_USER: process.env.BREVO_USER ? "✅ SET" : "❌ MISSING",
+      BREVO_SMTP_KEY: process.env.BREVO_SMTP_KEY ? "✅ SET" : "❌ MISSING",
+      ADMIN_EMAIL: process.env.ADMIN_EMAIL ? "✅ SET" : "❌ MISSING",
+      API_URL: process.env.API_URL || "❌ NOT SET",
+      FRONTEND_URL: process.env.FRONTEND_URL || "❌ NOT SET"
+    }
+  });
 });
 
 /* ---------------------- START SERVER ---------------------- */
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`✅ API running on http://localhost:${PORT}`);
-  console.log(`📧 Brevo user: ${process.env.BREVO_USER || "❌ NOT SET"}`);
+  console.log(`✅ API running on port ${PORT}`);
+  console.log(`📧 BREVO_USER: ${process.env.BREVO_USER || "❌ NOT SET"}`);
+  console.log(`🔑 BREVO_SMTP_KEY: ${process.env.BREVO_SMTP_KEY ? "✅ SET" : "❌ NOT SET"}`);
+  console.log(`👤 ADMIN_EMAIL: ${process.env.ADMIN_EMAIL || "❌ NOT SET"}`);
 });
