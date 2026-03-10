@@ -1,7 +1,9 @@
 const express = require("express");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 require("dotenv").config();
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -60,34 +62,13 @@ let events = [
 
 const bookings = {};
 
-/* ---------------------- GMAIL SMTP TRANSPORTER ---------------------- */
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
-
-/* ---------------------- VERIFY TRANSPORTER ON STARTUP ---------------------- */
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ SMTP connection FAILED:", error.message);
-    console.error("   → Check GMAIL_USER and GMAIL_PASS in your environment variables");
-  } else {
-    console.log("✅ SMTP connection verified! Emails are ready to send.");
-  }
-});
+/* ---------------------- RESEND EMAIL SETUP ---------------------- */
+// Using Resend API (works on Render — no SMTP port blocking)
 
 /* ---------------------- SEND EMAIL ---------------------- */
 async function sendEmail({ to, subject, html }) {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
-    console.error("❌ Email skipped — GMAIL_USER or GMAIL_PASS is not set!");
+  if (!process.env.RESEND_API_KEY) {
+    console.error("❌ Email skipped — RESEND_API_KEY is not set!");
     return;
   }
   if (!to) {
@@ -96,18 +77,19 @@ async function sendEmail({ to, subject, html }) {
   }
 
   try {
-    const info = await transporter.sendMail({
-      from: `"EventBook" <${process.env.GMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: "EventBook <onboarding@resend.dev>",
       to,
       subject,
       html
     });
-    console.log(`📧 Email sent to ${to} | MessageId: ${info.messageId}`);
+    if (error) {
+      console.error(`❌ Email FAILED to ${to}:`, error.message);
+    } else {
+      console.log(`📧 Email sent to ${to} | ID: ${data.id}`);
+    }
   } catch (err) {
-    console.error(`❌ Email FAILED to ${to}`);
-    console.error(`   Code: ${err.code}`);
-    console.error(`   Message: ${err.message}`);
-    if (err.response) console.error(`   SMTP Response: ${err.response}`);
+    console.error(`❌ Email FAILED to ${to}:`, err.message);
   }
 }
 
@@ -352,8 +334,7 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     admin_email: ADMIN_EMAIL,
     env: {
-      GMAIL_USER: process.env.GMAIL_USER ? "✅ SET" : "❌ MISSING",
-      GMAIL_PASS: process.env.GMAIL_PASS ? "✅ SET" : "❌ MISSING",
+      RESEND_API_KEY: process.env.RESEND_API_KEY ? "✅ SET" : "❌ MISSING",
       API_URL: process.env.API_URL || "❌ NOT SET",
       FRONTEND_URL: process.env.FRONTEND_URL || "❌ NOT SET"
     }
@@ -364,7 +345,6 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API running on port ${PORT}`);
-  console.log(`📧 GMAIL_USER: ${process.env.GMAIL_USER || "❌ NOT SET"}`);
-  console.log(`🔑 GMAIL_PASS: ${process.env.GMAIL_PASS ? "✅ SET" : "❌ NOT SET"}`);
+  console.log(`🔑 RESEND_API_KEY: ${process.env.RESEND_API_KEY ? "✅ SET" : "❌ NOT SET"}`);
   console.log(`👤 Admin notifications → ${ADMIN_EMAIL}`);
 });
