@@ -57,17 +57,12 @@ let events = [
 
 const bookings = {};
 
-/* ---------------------- BREVO SMTP TRANSPORTER ---------------------- */
+/* ---------------------- GMAIL SMTP TRANSPORTER ---------------------- */
 const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
-  port: 587,
-  secure: false,
+  service: "gmail",
   auth: {
-    user: process.env.BREVO_USER,
-    pass: process.env.BREVO_SMTP_KEY
-  },
-  tls: {
-    rejectUnauthorized: false // helps on some cloud platforms
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS
   }
 });
 
@@ -75,7 +70,7 @@ const transporter = nodemailer.createTransport({
 transporter.verify((error, success) => {
   if (error) {
     console.error("❌ SMTP connection FAILED:", error.message);
-    console.error("   → Check BREVO_USER and BREVO_SMTP_KEY in Render env vars");
+    console.error("   → Check GMAIL_USER and GMAIL_PASS in Render env vars");
   } else {
     console.log("✅ SMTP connection verified! Emails are ready to send.");
   }
@@ -84,8 +79,8 @@ transporter.verify((error, success) => {
 /* ---------------------- SEND EMAIL ---------------------- */
 async function sendEmail({ to, subject, html }) {
   // Guard: skip if env vars are missing
-  if (!process.env.BREVO_USER || !process.env.BREVO_SMTP_KEY) {
-    console.error("❌ Email skipped — BREVO_USER or BREVO_SMTP_KEY is not set in environment variables!");
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
+    console.error("❌ Email skipped — GMAIL_USER or GMAIL_PASS is not set in environment variables!");
     return;
   }
   if (!to) {
@@ -95,7 +90,7 @@ async function sendEmail({ to, subject, html }) {
 
   try {
     const info = await transporter.sendMail({
-      from: `"EventBook" <${process.env.BREVO_USER}>`,
+      from: `"EventBook" <${process.env.GMAIL_USER}>`,
       to,
       subject,
       html
@@ -302,8 +297,8 @@ app.get("/health", (req, res) => {
     status: "ok",
     timestamp: new Date().toISOString(),
     env: {
-      BREVO_USER: process.env.BREVO_USER ? "✅ SET" : "❌ MISSING",
-      BREVO_SMTP_KEY: process.env.BREVO_SMTP_KEY ? "✅ SET" : "❌ MISSING",
+      GMAIL_USER: process.env.GMAIL_USER ? "✅ SET" : "❌ MISSING",
+      GMAIL_PASS: process.env.GMAIL_PASS ? "✅ SET" : "❌ MISSING",
       ADMIN_EMAIL: process.env.ADMIN_EMAIL ? "✅ SET" : "❌ MISSING",
       API_URL: process.env.API_URL || "❌ NOT SET",
       FRONTEND_URL: process.env.FRONTEND_URL || "❌ NOT SET"
@@ -315,7 +310,7 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ API running on port ${PORT}`);
-  console.log(`📧 BREVO_USER: ${process.env.BREVO_USER || "❌ NOT SET"}`);
-  console.log(`🔑 BREVO_SMTP_KEY: ${process.env.BREVO_SMTP_KEY ? "✅ SET" : "❌ NOT SET"}`);
+  console.log(`📧 GMAIL_USER: ${process.env.GMAIL_USER || "❌ NOT SET"}`);
+  console.log(`🔑 GMAIL_PASS: ${process.env.GMAIL_PASS ? "✅ SET" : "❌ NOT SET"}`);
   console.log(`👤 ADMIN_EMAIL: ${process.env.ADMIN_EMAIL || "❌ NOT SET"}`);
 });
